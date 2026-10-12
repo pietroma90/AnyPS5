@@ -29,6 +29,17 @@ constexpr std::int32_t WRITING_MASK_NONE = 0;
 constexpr std::int32_t WRITING_MASK_FORMAT_CHARACTERS = 1;
 constexpr std::uint64_t CHARACTER_FLAG_FORMAT = 1ull << 42;
 
+constexpr std::size_t TEXT_CODES_CHARACTER_SLOT = 2;
+constexpr std::size_t TEXT_CODES_TERMINATOR_SLOT = 3;
+
+void FillTextCodes(FontTextCodes* textCodes, const FontTextCharacter* character, const FontTextCharacter* term) {
+    std::memset(textCodes, 0, sizeof(*textCodes));
+    textCodes->text.order = character->textOrder;
+    textCodes->text.code = character->characterCode;
+    textCodes->systemReserved[TEXT_CODES_CHARACTER_SLOT] = const_cast<FontTextCharacter*>(character);
+    textCodes->systemReserved[TEXT_CODES_TERMINATOR_SLOT] = const_cast<FontTextCharacter*>(term);
+}
+
 struct CharacterStorage {
     std::atomic<std::uint32_t> refCount{1};
     std::vector<FontTextCharacter> characters;
@@ -549,6 +560,34 @@ FontTextCharacter* APS5_VABI sceFontCharacterRefersTextNext(const FontTextCharac
         if (current->synthetic == 0 && current->clusterIndex == 0) return current;
     }
     return nullptr;
+}
+
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter* textCharacter, const FontTextCharacter* termCharacter, FontTextCodes* textCodes) {
+    if (!textCharacter || !textCodes) throw std::invalid_argument("sceFontCharactersRefersTextCodes: null argument");
+    FillTextCodes(textCodes, textCharacter, termCharacter);
+    return textCodes;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) throw std::invalid_argument("sceFontTextCodesStepNext: null argument");
+    const auto* current = static_cast<const FontTextCharacter*>(textCodesStep->systemReserved[TEXT_CODES_CHARACTER_SLOT]);
+    const auto* term = static_cast<const FontTextCharacter*>(textCodesStep->systemReserved[TEXT_CODES_TERMINATOR_SLOT]);
+    for (const FontTextCharacter* next = current ? current->next : nullptr; next && next != term; next = next->next) {
+        if (next->synthetic != 0 || next->clusterIndex != 0) continue;
+        FillTextCodes(textCodesStep, next, term);
+        return textCodesStep;
+    }
+    return nullptr;
+}
+
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes* textCodesStep) {
+    if (!textCodesStep) throw std::invalid_argument("sceFontTextCodesStepBack: null argument");
+    const auto* current = static_cast<const FontTextCharacter*>(textCodesStep->systemReserved[TEXT_CODES_CHARACTER_SLOT]);
+    const auto* term = static_cast<const FontTextCharacter*>(textCodesStep->systemReserved[TEXT_CODES_TERMINATOR_SLOT]);
+    const FontTextCharacter* previous = sceFontCharacterRefersTextBack(current);
+    if (!previous) return nullptr;
+    FillTextCodes(textCodesStep, previous, term);
+    return textCodesStep;
 }
 
 int APS5_VABI sceFontWritingInit(FontWriting* fontWriting, FontString fontString, const FontTextCharacter* fontCharacter) {

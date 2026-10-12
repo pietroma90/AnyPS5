@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <filesystem>
 #include <initializer_list>
+#include <cstring>
 #include <map>
 #include <random>
 #include <string>
@@ -56,6 +58,9 @@ FontTextCharacter* APS5_VABI sceFontWritingRefersRenderStepCharacter(FontWriting
 const void* APS5_VABI sceFontSelectLibraryFt(int);
 const void* APS5_VABI sceFontSelectRendererFt(int);
 int APS5_VABI sceFontCharacterGetSyllableStringState(const FontTextCharacter*, int*);
+FontTextCodes* APS5_VABI sceFontCharactersRefersTextCodes(const FontTextCharacter*, const FontTextCharacter*, FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepNext(FontTextCodes*);
+FontTextCodes* APS5_VABI sceFontTextCodesStepBack(FontTextCodes*);
 }
 
 static void Check(bool value, int line) {
@@ -380,5 +385,44 @@ int main() {
     syllableState = -1;
     Require(sceFontCharacterGetSyllableStringState(nullptr, &syllableState) == SCE_FONT_ERROR_INVALID_PARAMETER && syllableState == 0);
     Require(sceFontCharacterGetSyllableStringState(&character, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    FontTextCharacter chain[4]{};
+    int orders[4]{};
+    const std::uint32_t chainCodes[4] = {'A', 'B', 'X', 'C'};
+    for (int index = 0; index < 4; ++index) {
+        chain[index].characterCode = chainCodes[index];
+        chain[index].textOrder = &orders[index];
+        chain[index].prev = index > 0 ? &chain[index - 1] : nullptr;
+        chain[index].next = index < 3 ? &chain[index + 1] : nullptr;
+    }
+    chain[2].synthetic = 1;
+    FontTextCodes codes{};
+    std::memset(&codes, 0xcd, sizeof(codes));
+    Require(sceFontCharactersRefersTextCodes(&chain[0], nullptr, &codes) == &codes);
+    Require(codes.text.order == &orders[0] && codes.text.code == 'A' && codes.text.reserved == 0);
+    Require(codes.systemReserved[2] == &chain[0] && codes.systemReserved[3] == nullptr && codes.systemReserved[7] == nullptr);
+    Require(sceFontTextCodesStepNext(&codes) == &codes && codes.text.code == 'B' && codes.text.order == &orders[1]);
+    Require(sceFontTextCodesStepNext(&codes) == &codes && codes.text.code == 'C' && codes.systemReserved[2] == &chain[3]);
+    Require(sceFontTextCodesStepNext(&codes) == nullptr && codes.text.code == 'C');
+    Require(sceFontTextCodesStepBack(&codes) == &codes && codes.text.code == 'B');
+    Require(sceFontTextCodesStepBack(&codes) == &codes && codes.text.code == 'A');
+    Require(sceFontTextCodesStepBack(&codes) == nullptr && codes.text.code == 'A');
+    Require(sceFontCharactersRefersTextCodes(&chain[0], &chain[3], &codes) == &codes);
+    Require(sceFontTextCodesStepNext(&codes) == &codes && codes.text.code == 'B');
+    Require(sceFontTextCodesStepNext(&codes) == nullptr);
+    Require(sceFontCharactersRefersTextCodes(&chain[0], &chain[2], &codes) == &codes);
+    Require(sceFontTextCodesStepNext(&codes) == &codes && codes.text.code == 'B');
+    Require(sceFontTextCodesStepNext(&codes) == nullptr);
+    bool rejected = false;
+    try { sceFontTextCodesStepNext(nullptr); } catch (const std::exception&) { rejected = true; }
+    Require(rejected);
+    rejected = false;
+    try { sceFontTextCodesStepBack(nullptr); } catch (const std::exception&) { rejected = true; }
+    Require(rejected);
+    rejected = false;
+    try { sceFontCharactersRefersTextCodes(nullptr, nullptr, &codes); } catch (const std::exception&) { rejected = true; }
+    Require(rejected);
+    rejected = false;
+    try { sceFontCharactersRefersTextCodes(&chain[0], nullptr, nullptr); } catch (const std::exception&) { rejected = true; }
+    Require(rejected);
     std::filesystem::remove_all(fontRoot);
 }
